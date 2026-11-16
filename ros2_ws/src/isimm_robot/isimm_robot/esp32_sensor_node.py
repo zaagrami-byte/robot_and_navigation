@@ -1,3 +1,4 @@
+# ISIMM-FIX
 """
 ESP32 Sensor Node — ISIMM ROBOT.
 
@@ -70,7 +71,9 @@ class Esp32SensorNode(Node):
                     continue
             try:
                 line = self._ser.readline().decode('ascii', errors='replace').strip()
-            except serial.SerialException:
+            except (serial.SerialException, OSError, TypeError):
+                if self._stop:
+                    break
                 self.get_logger().error('Perte du lien ESP32, reconnexion...')
                 try:
                     self._ser.close()
@@ -149,4 +152,5 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()

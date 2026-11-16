@@ -1,3 +1,4 @@
+# ISIMM-FIX
 # SLAM Toolbox — MAPPING (jamais avec navigation.launch.py)
 # Entrées : /scan, TF odom->base_link (RF2O). Sortie : /map, TF map->odom.
 slam_toolbox:
@@ -22,12 +23,12 @@ slam_toolbox:
     min_laser_range: 0.15         # RPLIDAR A1 : mesures < 0.15 m invalides
     max_laser_range: 8.0
     minimum_time_interval: 0.5
-    transform_timeout: 0.2
+    transform_timeout: 0.5
     tf_buffer_duration: 30.0
     stack_size_to_use: 40000000
     enable_interactive_mode: true
 
-    map_update_interval: 2.0
+    map_update_interval: 5.0
     transform_publish_period: 0.02   # map->odom à 50 Hz
 
     use_scan_matching: true

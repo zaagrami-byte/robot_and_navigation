@@ -1,3 +1,4 @@
+// ISIMM-FIX
 /** ****************************************************************************************
 *  This node presents a fast and precise method to estimate the planar motion of a lidar
 *  from consecutive range scans. It is very useful for the estimation of the robot odometry from
@@ -62,7 +63,7 @@ void CLaserOdometry2D::init(const sensor_msgs::msg::LaserScan& scan,
 
   cols = width;						// Max resolution. Should be similar to the width parameter
   fovh = std::abs(scan.angle_max - scan.angle_min); // Horizontal Laser's FOV
-  ctf_levels = 5;                     // Coarse-to-Fine levels
+  ctf_levels = 3;                     // Coarse-to-Fine levels
   iter_irls  = 5;                      //Num iterations to solve iterative reweighted least squares
 
   Pose3d robot_initial_pose = Pose3d::Identity();
@@ -79,7 +80,7 @@ void CLaserOdometry2D::init(const sensor_msgs::msg::LaserScan& scan,
 
   //Set the initial pose
   laser_pose_    = robot_initial_pose * laser_pose_on_robot_;
-  laser_oldpose_ = laser_oldpose_;
+  laser_oldpose_ = laser_pose_;
 
   // Init module (internal)
   //------------------------
@@ -229,7 +230,7 @@ bool CLaserOdometry2D::odometryCalculation(const sensor_msgs::msg::LaserScan& sc
     computeWeights();
 
     //7. Solve odometry
-    if (num_valid_range > 3)
+    if (num_valid_range > 10)
     {
       solveSystemNonLinear();
       //solveSystemOneLevel();    //without robust-function
@@ -255,6 +256,8 @@ bool CLaserOdometry2D::odometryCalculation(const sensor_msgs::msg::LaserScan& sc
                 m_runtime.seconds()*double(1000));
 
   //Update poses
+  for (auto &T : transformations)
+    if (!T.allFinite()) T.setIdentity();
   PoseUpdate();
 
   return true;
@@ -557,10 +560,11 @@ void CLaserOdometry2D::computeWeights()
           kdtita*(dtita(u)*dtita(u)) +
           k2d*(std::abs(dtitat) + std::abs(dtita2));
 
-      weights(u) = std::sqrt(1.f/w_der);
+      weights(u) = std::sqrt(1.f/std::max(w_der, 1e-9f));
     }
 
-  const float inv_max = 1.f / weights.maxCoeff();
+  const float wmax = weights.maxCoeff();
+  const float inv_max = (std::isfinite(wmax) && wmax > 0.f) ? 1.f / wmax : 0.f;
   weights = inv_max*weights;
 }
 
@@ -618,6 +622,7 @@ void CLaserOdometry2D::solveSystemOneLevel()
   //Covariance matrix calculation 	Cov Order -> vx,vy,wz
   Eigen::MatrixXf res(num_valid_range,1);
   res = A*Var - B;
+  AtA.diagonal().array() += 1e-6f;   // régularisation
   cov_odo = (1.f/float(num_valid_range-3))*AtA.inverse()*res.squaredNorm();
 
   kai_loc_level_ = Var;
@@ -675,7 +680,7 @@ void CLaserOdometry2D::solveSystemNonLinear()
   //    printf("\n Aver dt = %f, aver res = %f", aver_dt, aver_res);
 
 
-  const float k = 10.f/aver_dt; //200
+  const float k = 10.f/std::max(aver_dt, 1e-3f); //200
   //float energy = 0.f;
   //for (unsigned int i=0; i<res.rows(); i++)
   //	energy += log(1.f + mrpt::math::square(k*res(i)));
@@ -713,6 +718,7 @@ void CLaserOdometry2D::solveSystemNonLinear()
     //printf("\nEnergy(%d) = %f", i, energy);
   }
 
+  AtA.diagonal().array() += 1e-6f;   // régularisation
   cov_odo = (1.f/float(num_valid_range-3))*AtA.inverse()*res.squaredNorm();
   kai_loc_level_ = Var;
 
@@ -809,11 +815,21 @@ bool CLaserOdometry2D::filterLevelSolution()
 {
   //		Calculate Eigenvalues and Eigenvectors
   //----------------------------------------------------------
+  if (!cov_odo.allFinite() || !kai_loc_level_.allFinite())
+  {
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+      "[rf2o] niveau %u ignore : non fini (valid=%u, cov_finite=%d, var_finite=%d)",
+      level, num_valid_range, (int)cov_odo.allFinite(), (int)kai_loc_level_.allFinite());
+    transformations[level].setIdentity();
+    return true;
+  }
   Eigen::SelfAdjointEigenSolver<Eigen::MatrixXf> eigensolver(cov_odo);
   if (eigensolver.info() != Eigen::Success)
   {
-    RCLCPP_WARN(get_logger(), "[rf2o] ERROR: Eigensolver couldn't find a solution. Pose is not updated");
-    return false;
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+      "[rf2o] eigensolver echoue au niveau %u : niveau ignore", level);
+    transformations[level].setIdentity();
+    return true;
   }
 
   //First, we have to describe both the new linear and angular speeds in the "eigenvector" basis
@@ -954,6 +970,7 @@ void CLaserOdometry2D::PoseUpdate()
   //-------------------------------------------------------------------------------------
   double time_inc_sec = (current_scan_time - last_odom_time).seconds();
   last_odom_time = current_scan_time;
+  if (time_inc_sec < 1e-3) time_inc_sec = 1e-3;
   lin_speed = acu_trans(0,2) / time_inc_sec;
   //double lin_speed = sqrt( mrpt::math::square(robot_oldpose.x()-robot_pose.x()) + mrpt::math::square(robot_oldpose.y()-robot_pose.y()) )/time_inc_sec;
 

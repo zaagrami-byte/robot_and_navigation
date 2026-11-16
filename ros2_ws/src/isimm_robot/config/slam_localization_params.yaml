@@ -1,3 +1,4 @@
+# ISIMM-FIX
 # SLAM Toolbox — LOCALISATION (localization_slam_toolbox_node).
 # map_file_name est écrasé par navigation.launch.py (chemin SANS extension).
 # Le "2D Pose Estimate" de RViz (/initialpose) recale le robot.
@@ -25,7 +26,7 @@ slam_toolbox:
     min_laser_range: 0.15
     max_laser_range: 8.0
     minimum_time_interval: 0.5
-    transform_timeout: 0.2
+    transform_timeout: 0.5
     tf_buffer_duration: 30.0
     stack_size_to_use: 40000000
 
